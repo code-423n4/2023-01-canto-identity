@@ -1,53 +1,3 @@
-# ✨ So you want to sponsor a contest
-
-This `README.md` contains a set of checklists for our contest collaboration.
-
-Your contest will use two repos: 
-- **a _contest_ repo** (this one), which is used for scoping your contest and for providing information to contestants (wardens)
-- **a _findings_ repo**, where issues are submitted (shared with you after the contest) 
-
-Ultimately, when we launch the contest, this contest repo will be made public and will contain the smart contracts to be reviewed and all the information needed for contest participants. The findings repo will be made public after the contest report is published and your team has mitigated the identified issues.
-
-Some of the checklists in this doc are for **C4 (🐺)** and some of them are for **you as the contest sponsor (⭐️)**.
-
----
-
-# Contest setup
-
-# Repo setup
-
-## ⭐️ Sponsor: Add code to this repo
-
-- [ ] Create a PR to this repo with the below changes:
-- [ ] Provide a self-contained repository with working commands that will build (at least) all in-scope contracts, and commands that will run tests producing gas reports for the relevant contracts.
-- [ ] Make sure your code is thoroughly commented using the [NatSpec format](https://docs.soliditylang.org/en/v0.5.10/natspec-format.html#natspec-format).
-- [ ] Please have final versions of contracts and documentation added/updated in this repo **no less than 24 hours prior to contest start time.**
-- [ ] Be prepared for a 🚨code freeze🚨 for the duration of the contest — important because it establishes a level playing field. We want to ensure everyone's looking at the same code, no matter when they look during the contest. (Note: this includes your own repo, since a PR can leak alpha to our wardens!)
-
-
----
-
-## ⭐️ Sponsor: Edit this README
-
-Under "SPONSORS ADD INFO HERE" heading below, include the following:
-
-- [ ] Modify the bottom of this `README.md` file to describe how your code is supposed to work with links to any relevent documentation and any other criteria/details that the C4 Wardens should keep in mind when reviewing. ([Here's a well-constructed example.](https://github.com/code-423n4/2022-08-foundation#readme))
-  - [ ] When linking, please provide all links as full absolute links versus relative links
-  - [ ] All information should be provided in markdown format (HTML does not render on Code4rena.com)
-- [ ] Under the "Scope" heading, provide the name of each contract and:
-  - [ ] source lines of code (excluding blank lines and comments) in each
-  - [ ] external contracts called in each
-  - [ ] libraries used in each
-- [ ] Describe any novel or unique curve logic or mathematical models implemented in the contracts
-- [ ] Does the token conform to the ERC-20 standard? In what specific ways does it differ?
-- [ ] Describe anything else that adds any special logic that makes your approach unique
-- [ ] Identify any areas of specific concern in reviewing the code
-- [ ] Optional / nice to have: pre-record a high-level overview of your protocol (not just specific smart contract functions). This saves wardens a lot of time wading through documentation.
-- [ ] See also: [this checklist in Notion](https://code4rena.notion.site/Key-info-for-Code4rena-sponsors-f60764c4c4574bbf8e7a6dbd72cc49b4#0cafa01e6201462e9f78677a39e09746)
-- [ ] Delete this checklist and all text above the line below when you're ready.
-
----
-
 # Canto Identity Protocol contest details
 - Total Prize Pool: $36,500 worth of CANTO
   - HM awards: $25,500 worth of CANTO
@@ -67,58 +17,95 @@ Automated findings output for the contest can be found [here](add link to report
 
 *Note for C4 wardens: Anything included in the automated findings output is considered a publicly known issue and is ineligible for awards.*
 
-[ ⭐️ SPONSORS ADD INFO HERE ]
+The following list contains some deliberate design decisions/known edge cases:
+- Front-running of `SubprotocolRegistry.register` calls: In theory, someone can front-run a call to `SubprotocolRegistry.register` with the same name, causing the original call to fail. There is a registration fee (100 $NOTE) and the damage is very limited (original registration call fails, user can just re-register under a different name), so this attack is not deemed feasible.
+- String confusions: Subprotocols are identified by a string and there are multiple ways to encode the same human-readable string. It is the responsibility of the developer that integrates with CID to ensure that he queries the correct string.
+- The ID 0 is disallowed on purpose in subprotocols. Subprotocols will be specifically developed for CID, so this is an interface that developers must adhere to and does not limit CID in any way.
+- Usage of `_mint` instead of `_safeMint`: Because we always mint to `msg.sender`, any smart contract that calls `mint` expects to get a NFT back. Therefore, this check can be saved there.
+- EIP165 checks for subprotocol NFTs: We check if a registered subprotocol NFT supports the `SubprotocolNFT` interface to prevent mistakes by the user. Of course, this does not guarantee in any way that a subprotocol NFT is non-malicious or really implements the interface. Because CID is a permissionless protocol, this has to be checked by the user when interacting with a particular subprotocol NFT.
+- Transferring CID NFTs that are still referenced in the address registry: CID NFTs are transferrable on purpose and a user can transfer his CID NFT while it is still registered to his address if he wants to do so.
+- Gas optimizations: Some of the checks that are performed are technically not necessary, because the contract would revert in some other place without the check. However, explicitness and clear errors are preferred in these cases over the (small) gas savings
 
 # Overview
 
-*Please provide some context about the code being audited, and identify any areas of specific concern in reviewing the code. (This is a good place to link to your docs, if you have them.)*
+**[Code Walkthrough Video](https://www.youtube.com/watch?v=k10DKImulZs)**
+
+Canto Identity Protocol (CID) is a permissionless protocol that reinvents the concept of on-chain identity. With CID, the power to control one's on-chain identity is returned to users.
+Within Canto Identity Protocol, ERC721 NFTs called cidNFTs represent individual on-chain identities. Users can mint CID NFTs for free by calling the `mint` method on CidNFT.sol.
+Users must register a CID NFT as their canonical on-chain identity with the `AddressRegistry`.
+
+## Canto Identity NFTs (`CidNFT.sol`)
+Canto Identity NFTs (CID NFTs) represent individual on-chain identities. Through nested mappings, they point to subprotocolNFTs representing individual identity traits.
+
+Users can add pointers to subprotocol NFTs to their CID NFTs by calling the `add` function on `CidNFT`. There are three different association types (ordered, primary, active) that can be used to model different types of associations between the CID NFT and subprotocol NFTs (depending on if this was allowed when registering the subprotocol). They can remove pointers to subprotocolNFTs from their cidNFTs by calling the `remove` function on `CidNFT` with the same inputs.
+
+## Address Registry (`AddressRegistry.sol`)
+Users associate a CID NFT with their address in the address registry. They can always remove the registration and register a new CID NFT.
+
+## Subprotocol Registry (`SubprotocolRegistry.sol`)
+Subprotocols must be registered with `SubprotocolRegistry` for a one-time fee in order to be used within Canto Identity Protocol. When registering, a user defines the allowed association types and an optional fee that is charged when adding the subprotocol to a CID NFT. Note that the association types are not mutually exclusive. In the usual case, most users will define one association types, but this is not restricted for the greatest flexibility.
+
+## Subprotocols (out-of-scope)
+The core Canto Identity Protocol has no notion of identity traits, such as display name. Instead, it provides a standardized interface (`CidSubprotocolNFT`) for granular, trait-specific identity protocols called Subprotocols.
+
+Subprotocol creation is permissionless. However, they must be registered with `SubprotocolRegistry` for a one-time fee in order to be used within Canto Identity Protocol.
+
+Note that subprotocols itself are not part of this contest.
 
 # Scope
 
-*List all files in scope in the table below (along with hyperlinks) -- and feel free to add notes here to emphasize areas of focus.*
-
-*For line of code counts, we recommend using [cloc](https://github.com/AlDanial/cloc).* 
-
 | Contract | SLOC | Purpose | Libraries used |  
 | ----------- | ----------- | ----------- | ----------- |
-| [contracts/folder/sample.sol](contracts/folder/sample.sol) | 123 | This contract does XYZ | [`@openzeppelin/*`](https://openzeppelin.com/contracts/) |
+| [src/AddressRegistry.sol](src/AddressRegistry.sol) | 28 | Allows users to register their CID NFT and associate it with their address. | [`solmate/*`](https://github.com/transmissions11/solmate) |
+| [src/CidNFT.sol](src/CidNFT.sol) | 231 | The Canto Identity Protocol NFT. The NFTs of different subprotocols are associated with a CID NFT. There are different types for this association and it can be configured when registering a subprotocol which types are allowed. | [`solmate/*`](https://github.com/transmissions11/solmate) |
+| [src/SubprotocolRegistry.sol](src/SubprotocolRegistry.sol) | 61 | Users have to register a subprotocol in the registry such that it can be added to a CID NFT. Typically, this will be done by the creator of a subprotocol, but this is no hard requirement. | [`solmate/*`](https://github.com/transmissions11/solmate) |
 
 ## Out of scope
 
-*List any files/contracts that are out of scope for this audit.*
-
-# Additional Context
-
-*Describe any novel or unique curve logic or mathematical models implemented in the contracts*
-
-*Sponsor, please provide the information below.*
+| Contract | SLOC | Purpose | Libraries used |  
+| ----------- | ----------- | ----------- | ----------- |
+| [src/CidSubprotocolNFT.sol](src/CidSubprotocolNFT.sol) | 28 | This abstract contract will be the base for subprotocol NFTs that developers can use to build new subprotocols. Subprotocols are not part of this contest and this interface may be changed slightly. The file is still included for the sake of completeness. | [`solmate/*`](https://github.com/transmissions11/solmate) |
 
 ## Scoping Details 
 ```
 - If you have a public code repo, please share it here:  
-- How many contracts are in scope?:   
-- Total SLoC for these contracts?:  
-- How many external imports are there?:  
-- How many separate interfaces and struct definitions are there for the contracts within scope?:  
-- Does most of your code generally use composition or inheritance?:   
-- How many external calls?:   
-- What is the overall line coverage percentage provided by your tests?:  
-- Is there a need to understand a separate part of the codebase / get context in order to audit this part of the protocol?:   
-- Please describe required context:   
-- Does it use an oracle?:  
-- Does the token conform to the ERC20 standard?:  
-- Are there any novel or unique curve logic or mathematical models?: 
-- Does it use a timelock function?:  
-- Is it an NFT?: 
-- Does it have an AMM?:   
-- Is it a fork of a popular project?:   
-- Does it use rollups?:   
-- Is it multi-chain?:  
-- Does it use a side-chain?: 
+- How many contracts are in scope?: 3
+- Total SLoC for these contracts?: 320
+- How many external imports are there?: 3 
+- How many separate interfaces and struct definitions are there for the contracts within scope?: 1  
+- Does most of your code generally use composition or inheritance?: Inheritance
+- How many external calls?: 8
+- What is the overall line coverage percentage provided by your tests?: 100%
+- Is there a need to understand a separate part of the codebase / get context in order to audit this part of the protocol?: No, completely new protocol without any dependencies
+- Does it use an oracle?: No
+- Does the token conform to the ERC20 standard?: No token
+- Are there any novel or unique curve logic or mathematical models?: No
+- Does it use a timelock function?: No
+- Is it an NFT?: Yes
+- Does it have an AMM?: No  
+- Is it a fork of a popular project?: No  
+- Does it use rollups?: No
+- Is it multi-chain?: No
+- Does it use a side-chain?: No
 ```
 
 # Tests
+After cloning the repo, the following command is sufficient to run the whole test suite:
+```
+forge test
+```
 
-*Provide every step required to build the project from a fresh git clone, as well as steps to run the tests with a gas report.* 
+To generate a gas report:
+```
+forge test --gas-report
+```
 
-*Note: Many wardens run Slither as a first pass for testing.  Please document any known errors with no workaround.* 
+All-in-one command:
+```
+rm -rf 2023-01-canto || true && git clone https://github.com/code-423n4/2023-01-canto.git && foundryup && forge test --gas-report
+```
+
+To run slither:
+```
+slither . --compile-force-framework foundry
+```
