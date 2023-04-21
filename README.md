@@ -80,6 +80,7 @@ forge install
 The following command is sufficient to run the whole test suite:
 ```bash
 forge test
+forge test --match-path src/test/Vulnerabilities.sol --verbosity -vv 
 ```
 
 To generate a gas report:
